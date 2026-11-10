@@ -11,20 +11,22 @@ SECRET_PASSWORD = "IHf23sP"
 
 authenticated_users = set()
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    authenticated_users.discard(user_id) # خارج کردن کاربر از حالت تایید شده
-    
+    authenticated_users.discard(user_id)
+
     await update.message.reply_text(
-        "سلام ! 🎵\n"
+        "سلام عزیز! 🎵\n"
         "برای استفاده از بات، لطفاً ابتدا رمز عبور خود را وارد کنید:"
     )
 
+
 def download_audio(query: str):
     os.makedirs("downloads", exist_ok=True)
-    
+
     query = query.replace("دانلود", "").replace("آهنگ", "").replace("اهنگ", "").strip()
-    
+
     if not (query.startswith("http://") or query.startswith("https://")):
         query = f"ytsearch1:{query}"
 
@@ -41,26 +43,44 @@ def download_audio(query: str):
         'retries': 20,
         'quiet': False,
         'noplaylist': True,
+
+        # تنظیمات روش اول برای انتخاب کلاینت یوتیوب
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web_creator']
+            }
+        },
+        'http_headers': {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/120.0.0.0 Safari/537.36'
+            ),
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=True)
+
             if 'entries' in info:
                 info = info['entries'][0]
-                
+
             filename = ydl.prepare_filename(info)
             mp3_filename = os.path.splitext(filename)[0] + ".mp3"
-            
+
             return {
                 'filepath': mp3_filename,
                 'title': info.get('title', 'Unknown Title'),
                 'performer': info.get('uploader', 'Unknown Artist'),
                 'duration': info.get('duration', 0)
             }
+
     except Exception as e:
         print(f"❌ خطای دقیق yt-dlp: {e}")
-        raise e
+        raise
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -69,13 +89,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    # اگر کاربر خواست ریست کنه و از اول شروع کنه
     if text.strip() in ["شروع مجدد", "خروج", "reset"]:
         authenticated_users.discard(user_id)
-        await update.message.reply_text("🔄 وضعیت شما ریست شد. لطفاً رمز عبور خود را وارد کنید:")
+        await update.message.reply_text(
+            "🔄 وضعیت شما ریست شد. لطفاً رمز عبور خود را وارد کنید:"
+        )
         return
 
-    # بررسی رمز عبور
     if user_id not in authenticated_users:
         if text.strip() == SECRET_PASSWORD:
             authenticated_users.add(user_id)
@@ -85,11 +105,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "(هر وقت خواستی خارج بشی کافیه بنویسی: شروع مجدد)"
             )
         else:
-            await update.message.reply_text("❌ رمز عبور اشتباه است! لطفاً رمز صحیح را وارد کنید:")
+            await update.message.reply_text(
+                "❌ رمز عبور اشتباه است! لطفاً رمز صحیح را وارد کنید:"
+            )
         return
 
     chat_id = update.effective_chat.id
-    status_msg = await update.message.reply_text("🔍 دارم با سرعت دنبال آهنگ می‌گردم، صبور باش ...")
+    status_msg = await update.message.reply_text(
+        "🔍 دارم با سرعت دنبال آهنگ می‌گردم، صبور باش..."
+    )
+
+    file_path = None
 
     try:
         loop = asyncio.get_running_loop()
@@ -98,7 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_path = audio_info['filepath']
 
         await status_msg.edit_text("📤 در حال آپلود موزیک توی تلگرام...")
-        
+
         with open(file_path, 'rb') as audio_file:
             await context.bot.send_audio(
                 chat_id=chat_id,
@@ -111,25 +137,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 connect_timeout=60
             )
 
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
         await status_msg.delete()
 
     except Exception as e:
         print(f"Error: {e}")
-        await status_msg.edit_text(f"❌ خطا در دانلود یا آپلود: {str(e)[:100]}")
+        await status_msg.edit_text(
+            f"❌ خطا در دانلود یا آپلود: {str(e)[:100]}"
+        )
+
+    finally:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+
 
 def main():
-    print("🤖 بات پایتونی روشن شد،  آماده باش!")
-    
-    request = HTTPXRequest(connect_timeout=60.0, read_timeout=300.0, write_timeout=300.0)
+    print("🤖 بات پایتونی روشن شد، آماده باش!")
+
+    request = HTTPXRequest(
+        connect_timeout=60.0,
+        read_timeout=300.0,
+        write_timeout=300.0
+    )
+
     app = ApplicationBuilder().token(TOKEN).request(request).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+    )
 
     app.run_polling()
+
 
 if __name__ == '__main__':
     main()
